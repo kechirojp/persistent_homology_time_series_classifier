@@ -25,61 +25,90 @@ from src.classifier_utils import (
     calculate_sequence_metrics
 )
 
-def generate_sample_data(n_samples: int = 1000, n_features: int = 6) -> tuple:
+def generate_sample_data(n_samples: int = 240, n_features: int = 4) -> tuple:
     """
-    サンプルデータ生成（時系列データを模擬）
+    デパート月次データのサンプル生成（20年分 = 240ヶ月）
     
-    【例え話：お店の来客データ】
-    - n_samples：観測日数（例：1000日分）
-    - 特徴量0-3：売上関連指標（メイン売上、関連商品売上など）
-    - 特徴量4：ボリューム的特徴（来客数）
-      → 好調/不調どちらでも注目度が上がると増加（絶対値使用）
-    - 特徴量5：指標的特徴（顧客満足度）
-      → 好調時は上昇、不調時は下降（tanh使用で-1〜+1範囲）
+    【具体例：デパートの月次営業データ】
+    - 特徴量0：メイン売上（食品、衣料品、雑貨など）百万円
+    - 特徴量1：関連商品売上（イベント商品、季節商品など）百万円  
+    - 特徴量2：来客数（月間延べ来客数）千人
+    - 特徴量3：営業時間（月間総営業時間）時間
+    
+    パターン：
+    - 通常期：12ヶ月周期の季節変動（春夏秋冬）
+    - 特別期：年末年始、GW、お盆の売上増
+    - 異常期：コロナ禍（2020年）やリニューアル工事期間
     
     Returns:
     --------
     data : np.ndarray
-        模擬時系列データ (n_samples, n_features)
+        デパート月次データ (240, 4)
     labels : np.ndarray  
-        ラベル (0:class_a, 1:class_b, 2:neutral)
+        期間ラベル (0:通常期, 1:特別期, 2:異常期)
     """
     np.random.seed(42)
     
-    # 基本パターン生成
-    t = np.linspace(0, 10, n_samples)
-    pattern = np.sin(t) + 0.5 * np.sin(3*t) + 0.1 * np.random.randn(n_samples)
+    # 20年間（240ヶ月）の月インデックス
+    months = np.arange(240)
+    data = np.zeros((240, 4))
+    labels = np.zeros(240, dtype=int)
     
-    # 各特徴量生成（多次元時系列）
-    data = np.zeros((n_samples, n_features))
-    
-    # 主要な値（基準）- メイン売上
-    data[:, 0] = 100 + 10 * pattern + np.random.randn(n_samples) * 0.5
-    
-    # 関連する特徴量 - 関連商品売上
-    data[:, 1] = data[:, 0] + np.random.randn(n_samples) * 0.3  # feature_1
-    data[:, 2] = data[:, 0] + np.abs(np.random.randn(n_samples)) * 0.5  # feature_2
-    data[:, 3] = data[:, 0] - np.abs(np.random.randn(n_samples)) * 0.5  # feature_3
-    
-    # ボリューム的特徴 - 来客数（好調/不調どちらでも注目度で増加）
-    data[:, 4] = 1000 + 200 * np.abs(pattern) + np.random.randn(n_samples) * 50
-    
-    # 指標的特徴 - 顧客満足度（好調時+、不調時-）
-    data[:, 5] = 50 + 30 * np.tanh(pattern) + np.random.randn(n_samples) * 5
-    
-    # ラベル生成（パターンベース）
-    labels = np.zeros(n_samples, dtype=int)
-    
-    # Class A（ピーク値）: パターンが高く、次に下がる
-    class_a_condition = (pattern > 0.8) & (np.gradient(pattern) < -0.1)
-    labels[class_a_condition] = 0
-    
-    # Class B（谷値）: パターンが低く、次に上がる  
-    class_b_condition = (pattern < -0.8) & (np.gradient(pattern) > 0.1)
-    labels[class_b_condition] = 1
-    
-    # Neutral（それ以外）
-    labels[(~class_a_condition) & (~class_b_condition)] = 2
+    for i, month in enumerate(months):
+        year = 2000 + month // 12  # 2000年から開始
+        month_of_year = month % 12 + 1  # 1-12月
+        
+        # === 基本的な季節パターン ===
+        # 季節係数（春夏秋冬）
+        seasonal_factor = 1.0 + 0.3 * np.sin(2 * np.pi * month / 12)
+        
+        # 年末商戦ブースト（12月、1月）
+        if month_of_year in [12, 1]:
+            seasonal_factor *= 1.8
+            labels[i] = 1  # 特別期
+        # GW・お盆ブースト（5月、8月）
+        elif month_of_year in [5, 8]:
+            seasonal_factor *= 1.4
+            labels[i] = 1  # 特別期
+        else:
+            labels[i] = 0  # 通常期
+            
+        # === 異常期間の設定 ===
+        # コロナ禍（2020年3月-2021年12月）
+        if 2020 <= year <= 2021:
+            if year == 2020 and month_of_year >= 3:
+                seasonal_factor *= 0.4  # 売上大幅減
+                labels[i] = 2  # 異常期
+            elif year == 2021:
+                seasonal_factor *= 0.7  # 回復途上
+                labels[i] = 2  # 異常期
+                
+        # リニューアル工事（2010年6-8月）
+        if year == 2010 and month_of_year in [6, 7, 8]:
+            seasonal_factor *= 0.2  # 営業停止状態
+            labels[i] = 2  # 異常期
+            
+        # === 各特徴量の生成 ===
+        base_noise = np.random.normal(0, 0.1, 4)
+        
+        # 特徴量0: メイン売上（基準値500百万円）
+        data[i, 0] = 500 * seasonal_factor + base_noise[0] * 50
+        
+        # 特徴量1: 関連商品売上（メイン売上の30-50%）
+        relation_ratio = 0.4 + 0.1 * np.sin(2 * np.pi * month / 6)  # 半年周期
+        data[i, 1] = data[i, 0] * relation_ratio + base_noise[1] * 20
+        
+        # 特徴量2: 来客数（基準値100千人）
+        customer_factor = seasonal_factor * (1 + 0.2 * np.cos(2 * np.pi * month / 12))
+        data[i, 2] = 100 * customer_factor + base_noise[2] * 10
+        
+        # 特徴量3: 営業時間（基準値300時間/月）
+        # 異常期は営業時間短縮
+        if labels[i] == 2:  # 異常期
+            hour_factor = 0.7  # 営業時間短縮
+        else:
+            hour_factor = 1.0
+        data[i, 3] = 300 * hour_factor + base_noise[3] * 5
     
     return data, labels
 
@@ -118,90 +147,132 @@ def main():
     
     # 4. TDA特徴抽出
     print("\n4. TDA特徴抽出中...")
+def main():
+    """
+    デパート月次データを使った持続ホモロジー分析のデモ
+    """
+    print("🏬 デパート月次データの持続ホモロジー分析デモ")
+    print("=" * 60)
     
-    # TDA特徴抽出器の初期化
+    # 1. データ生成
+    print("1. デパート月次データ生成中...")
+    print("   📅 期間: 2000年1月 - 2019年12月（20年間、240ヶ月）")
+    print("   📊 特徴量: メイン売上、関連商品売上、来客数、営業時間")
+    
+    data, labels = generate_sample_data()
+    print(f"   データ形状: {data.shape}")
+    
+    # ラベルの内訳を表示
+    label_names = ['通常期', '特別期', '異常期']
+    for i, name in enumerate(label_names):
+        count = np.sum(labels == i)
+        print(f"   {name}: {count}ヶ月")
+    
+    # 2. データ前処理
+    print("\n2. データ前処理中...")
+    
+    # 対数変換（売上データの歪みを修正）
+    data_transformed = signed_log_transform(data)
+    print("   ✅ 対数変換完了")
+    
+    # 正規化
+    data_normalized, scaler = normalize_data(data_transformed, method='zscore')
+    print("   ✅ Z-score正規化完了")
+    
+    # 滑らかウィンドウ作成（12ヶ月窓で年単位分析）
+    window_size = 12  # 12ヶ月 = 1年間のパターンを見る
+    windows, window_labels = create_sliding_windows(
+        data_normalized, 
+        window_size=window_size,
+        step_size=1
+    )
+    print(f"   ✅ {len(windows)}個の12ヶ月窓を作成")
+    
+    # 3. TDA特徴抽出
+    print("\n3. 持続ホモロジー分析中...")
+    
     tda_extractor = TDAFeatureExtractor(
-        embedding_dim=3,
-        tau=1,
-        max_edge_length=2.0,
-        persistence_threshold=0.1
+        embedding_dim=3,          # 3次元埋め込み
+        tau=1,                    # 遅延時間
+        max_edge_length=2.0,      # エッジ最大距離
+        persistence_threshold=0.1  # 持続性閾値
     )
     
-    # 少数のサンプルで処理（計算時間短縮のため）
-    sample_windows = windows[:50]  # 50ウィンドウのみ処理
-    sample_labels = window_labels[:50]
+    print("   🔍 各12ヶ月窓のbirth-death分析実行中...")
     
-    # TDA特徴抽出
     try:
         tda_features, components = tda_extractor.extract_features(
-            sample_windows, 
+            windows[:100],  # 最初の100窓のみ（計算時間短縮）
             return_components=True
         )
-        print(f"TDA特徴形状: {tda_features.shape}")
-        print(f"PDスコア形状: {components['pd_scores'].shape}")
-        print(f"Simplex tree特徴形状: {components['simplex_tree_features'].shape}")
-    
+        
+        print(f"   ✅ TDA特徴抽出完了: {tda_features.shape}")
+        
+        # 持続性スコアを取得
+        persistence_scores = components['pd_scores'].flatten()
+        simplex_features = components['simplex_tree_features']
+        
+        print(f"   📈 持続性スコア: 平均={persistence_scores.mean():.3f}, 標準偏差={persistence_scores.std():.3f}")
+        
     except Exception as e:
-        print(f"TDA特徴抽出エラー: {e}")
-        print("ダミーのTDA特徴を生成します...")
-        tda_features = np.random.randn(len(sample_windows), 12)
-        components = {
-            'pd_scores': np.random.randn(len(sample_windows), 1),
-            'simplex_tree_features': np.random.randn(len(sample_windows), 11)
-        }
+        print(f"   ❌ TDA特徴抽出エラー: {e}")
+        return
     
-    # 5. 機械学習モデルの訓練
-    print("\n5. 機械学習モデル訓練中...")
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.model_selection import train_test_split
+    # 4. 異常検知分析
+    print("\n4. 異常検知分析中...")
     
-    # 訓練・テストデータ分割
-    X_train, X_test, y_train, y_test = train_test_split(
-        tda_features, sample_labels, test_size=0.3, random_state=42
-    )
+    # 低い持続性 = 異常と判定
+    anomaly_threshold = np.percentile(persistence_scores, 10)  # 下位10%
+    anomalies = persistence_scores < anomaly_threshold
     
-    # 分類器訓練
-    classifier = RandomForestClassifier(n_estimators=100, random_state=42)
-    classifier.fit(X_train, y_train)
+    print(f"   🎯 異常判定閾値: {anomaly_threshold:.3f}")
+    print(f"   🚨 検出された異常窓: {np.sum(anomalies)}/{len(anomalies)}")
     
-    # 予測
-    y_pred = classifier.predict(X_test)
+    # 異常窓の詳細表示
+    anomaly_indices = np.where(anomalies)[0]
+    if len(anomaly_indices) > 0:
+        print("   📋 異常検出された期間:")
+        for idx in anomaly_indices[:5]:  # 最初の5つだけ表示
+            start_month = idx + 1  # 1始まり
+            end_month = start_month + 11
+            start_year = 2000 + (start_month - 1) // 12
+            end_year = 2000 + (end_month - 1) // 12
+            print(f"      - {start_year}年{(start_month-1)%12+1}月〜{end_year}年{(end_month-1)%12+1}月 (持続性: {persistence_scores[idx]:.3f})")
     
-    # 6. 評価
-    print("\n6. 性能評価中...")
-    metrics = evaluate_classification(y_test, y_pred, verbose=True)
+    # 5. 構造分析
+    print("\n5. データ構造分析...")
     
-    # 7. 予測ポイントフィルタリング
-    print("\n7. 予測ポイントフィルタリング中...")
-    tda_scores = tda_features[:len(y_pred)]  # テストデータに合わせる
-    filtered_points = filter_prediction_points(
-        X_test, 
-        y_pred, 
-        tda_scores=tda_scores,
-        pd_threshold=0.1,
-        density_threshold=5
-    )
-    print(f"フィルタ済みポイント数: {len(filtered_points)}")
+    # 各次元の統計
+    print("   🏝️ 0次元（連結成分）:")
+    betti_0 = simplex_features[:, 2]  # betti_0のインデックス
+    print(f"      平均: {betti_0.mean():.2f}, 範囲: {betti_0.min():.0f}-{betti_0.max():.0f}")
     
-    # 8. 分類シグナル生成
-    print("\n8. 分類シグナル生成中...")
-    signals = create_classification_signals(filtered_points, confidence_threshold=0.5)
-    print(f"Class Aシグナル: {len(signals['class_a'])}")
-    print(f"Class Bシグナル: {len(signals['class_b'])}")
-    print(f"Neutralシグナル: {len(signals['neutral'])}")
+    print("   🔄 1次元（周期構造）:")
+    betti_1 = simplex_features[:, 3]  # betti_1のインデックス  
+    print(f"      平均: {betti_1.mean():.2f}, 範囲: {betti_1.min():.0f}-{betti_1.max():.0f}")
     
-    # 9. 系列指標（模擬値で）
-    print("\n9. 系列指標計算中...")
-    mock_values = data[:len(y_pred), 0]  # 主要な値を使用
-    sequence_metrics = calculate_sequence_metrics(signals, mock_values)
-    print("系列指標:")
-    for key, value in sequence_metrics.items():
-        print(f"  {key}: {value:.4f}")
+    # 6. 結果サマリー
+    print("\n" + "=" * 60)
+    print("📊 分析結果サマリー")
+    print("=" * 60)
+    print(f"🏬 対象期間: 20年間（240ヶ月）のデパート営業データ")
+    print(f"🔍 分析窓数: {len(windows)}個の12ヶ月窓")
+    print(f"📈 平均持続性: {persistence_scores.mean():.3f}")
+    print(f"🚨 異常検出: {np.sum(anomalies)}窓（{100*np.sum(anomalies)/len(anomalies):.1f}%）")
+    print(f"⭐ 構造安定性: {'高' if persistence_scores.std() < 0.5 else '中' if persistence_scores.std() < 1.0 else '低'}")
     
-    print("\n=== 実行完了 ===")
-    print(f"F1スコア: {metrics['f1_score']:.4f}")
-    print("持続ホモロジーを使った分類の基本的な流れを確認できました。")
+    print("\n✅ 分析完了！")
+    print("💡 ヒント: 持続性が低い期間は構造的な変化（異常）の可能性があります")
+    
+    return {
+        'data': data,
+        'labels': labels,
+        'windows': windows,
+        'tda_features': tda_features,
+        'persistence_scores': persistence_scores,
+        'anomalies': anomalies
+    }
 
 
 if __name__ == "__main__":
-    main()
+    results = main()

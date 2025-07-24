@@ -70,10 +70,10 @@ from src import (
     normalize_data
 )
 
-# Data preprocessing
+# Data preprocessing for monthly department store data
 data_transformed = signed_log_transform(data)
 data_normalized, _ = normalize_data(data_transformed, method='zscore')
-windows, labels = create_sliding_windows(data_normalized, window_size=40)
+windows, labels = create_sliding_windows(data_normalized, window_size=12)  # 12-month windows
 
 # TDA feature extraction
 tda_extractor = TDAFeatureExtractor(
@@ -89,107 +89,181 @@ tda_features, components = tda_extractor.extract_features(
     return_components=True
 )
 
-# Get PD scores and Simplex Tree features
-pd_scores = components['pd_scores']
+# Get birth-death distances and Simplex Tree features
+persistence_scores = components['pd_scores']  # Persistence duration for each structure
 simplex_features = components['simplex_tree_features']
 ```
 
 ## Sample Data
 
-The sample data used in `example_usage.py` simulates **store visitor data**:
+The sample data used in `example_usage.py` simulates **monthly department store business data**:
 
-- **Features 0-3**: Sales-related indicators (main sales, related product sales, etc.)
-- **Feature 4**: Volume-based feature (visitor count)
-  - Increases during both good and bad periods due to "attention level"
-  - Uses `np.abs(pattern)` for absolute values
-- **Feature 5**: Indicator-based feature (customer satisfaction score)
-  - Rises during good periods, falls during bad periods
-  - Uses `np.tanh(pattern)` to vary within -1 to +1 range
+- **Feature 0**: Main sales (food, clothing, miscellaneous goods, etc.) in millions of yen
+- **Feature 1**: Related product sales (event products, seasonal products, etc.) in millions of yen
+- **Feature 2**: Customer count (monthly total visitors) in thousands
+- **Feature 3**: Operating hours (monthly total operating hours) in hours
 
-This design combines features with different characteristics, making topological "shape change" detection through persistent homology more effective.
+**Data Characteristics**:
+- 12-month seasonal patterns (spring, summer, autumn, winter sales variations)
+- Variations during special periods (New Year, Golden Week, Obon, etc.)
+- Mix of normal and abnormal periods (COVID-19, major construction, etc.)
+
+Using such **familiar and understandable data** makes it intuitive to understand "structural changes" in persistent homology.
 
 ## Anomaly Detection Application
 
+**Basic Concept**:
+- **Normal months**: Same seasonal patterns every year → Structures last long → High persistence
+- **Abnormal months**: Patterns break down → Structures collapse quickly → Low persistence
+
 ```python
-# Anomaly detection configuration
-tda_extractor = TDAFeatureExtractor(
-    persistence_threshold=0.05  # Set lower for anomaly detection
-)
+# Detect months with low persistence as anomalies
+tda_extractor = TDAFeatureExtractor()
+features, components = tda_extractor.extract_features(windows, return_components=True)
 
-# Anomaly assessment
-pd_scores = components['pd_scores']
-anomaly_threshold = np.percentile(pd_scores, 95)  # Top 5% as anomalies
-anomalies = pd_scores > anomaly_threshold
+# Persistence scores (high = normal, low = abnormal)
+persistence_scores = components['pd_scores']
 
-print(f"Detected anomaly periods: {np.sum(anomalies)} / {len(anomalies)}")
+# Classify bottom 10% as anomalies
+anomaly_threshold = np.percentile(persistence_scores, 10)
+anomalies = persistence_scores < anomaly_threshold
+
+print(f"Abnormal periods: {np.sum(anomalies)} / {len(anomalies)} windows")
+
+# Identify which months are abnormal
+for i, is_anomaly in enumerate(anomalies):
+    if is_anomaly:
+        print(f"Anomaly detected in {i+1}th 12-month window")
 ```
+
+**Department Store Example**:
+- Normal: December every year shows regular year-end sales increases
+- Abnormal: December 2020 during COVID-19 shows completely different patterns → Detected by low persistence
+
+## What is Persistent Homology?
+
+**Simply put, it's a technique to measure "when structures begin and end"**
+
+### Basic Concept: Birth-Death
+
+Track "when certain structures start and when they end" in data:
+
+**📍 Birth**: The moment when a new structure appears
+- Department store example: "Period when sales start rising rapidly", "Start of new customer pattern"
+
+**⚰️ Death**: The moment when that structure disappears  
+- Department store example: "Period when sales rise ends", "End of customer pattern"
+
+**⏱️ Persistence**: Death - Birth
+- "How long that structure lasted"
+- Long-lasting structures = Important patterns
+- Quickly disappearing structures = Noise
+
+### Viewing Structures in 3 Dimensions
+
+**🏝️ 0-dimension (Islands/Connected Components)**
+- How many "clusters" of data exist
+- Department store example: "Separation of weekday and weekend customers", "Different generational customer groups"
+
+**🔄 1-dimension (Holes/Cycles)**  
+- "Repetitive patterns" in data
+- Department store example: "Month-end sale cycles", "Seasonal variation patterns"
+
+**🌐 2-dimension (Voids/Complex Structures)**
+- Complex 3-dimensional structures
+- Department store example: "Complex sales patterns involving multiple factors"
+
+### Why Effective for Anomaly Detection?
+
+**Normal times**: Regular patterns → Structures persist long (long persistence)
+**Abnormal times**: Patterns collapse → Structures disappear quickly (short persistence)
+
+**Concrete Example (Department Store)**:
+- Normal: Sales rise at month-end every month (12 regular birth-death cycles)
+- Abnormal: Pattern disappears during COVID-19 (disrupted birth-death)
 
 ## Feature Details
 
-### PD Score
+### Birth-Death Distance (Persistence Distance)
 
-Weighted average score calculated from each dimension of persistent homology:
+Measures the "length of persistence duration" for each structure:
 
-**🏝️ 0-dimension (Connected Components/Islands) - Weight: 0.2 (20%)**
-- **Meaning**: Number and persistence of separated data parts
-- **Store Example**: Business hours continuity, basic activity state
-- **Simplex Tree Relation**: Directly corresponds to `betti_0` (connected components)
-
-**🔄 1-dimension (Holes/Cycles) - Weight: 0.6 (60%) ← Most Important!**
-- **Meaning**: Periodic patterns, stability of cyclic structures
-- **Store Example**: Weekend/weekday cycles, seasonal variations, lunch/dinner repetitions
-- **Simplex Tree Relation**: Related to `betti_1` (1-dimensional holes), `clustering_coeff`
-
-**🌐 2-dimension (Voids/Complex Structures) - Weight: 0.2 (20%)**
-- **Meaning**: Higher-order complex structural patterns
-- **Store Example**: Complex patterns with multiple overlapping cycles
-- **Simplex Tree Relation**: Related to `num_triangles` (triangle count)
-
-**Formula**:
-```
-PD Score = 0.2×(0-dim persistence) + 0.6×(1-dim persistence) + 0.2×(2-dim persistence)
+```python
+persistence_distance = death_value - birth_value
 ```
 
-**Why 60% for 1-dimension?**
-- "Regular repetitive patterns" are most important information in time series data
-- For anomaly detection, we want to sensitively detect "deviations from usual cycles"
-- 0-dim and 2-dim are more susceptible to noise, so weights are suppressed
-
-**Role in Anomaly Detection**:
-- **Normal**: Regular cycles → Low PD score
-- **Anomalous**: Cycle collapse/irregularity → High PD score
+**Long persistence duration** = Stable important structure (normal pattern)
+**Short persistence duration** = Unstable noise (sign of anomaly)
 
 ### Simplex Tree Features (11 dimensions)
 
-Graph-theoretic statistics providing detailed structural information to complement PD scores:
+Auxiliary indicators that reveal "structural details" not visible from Birth-Death alone:
 
-**Basic Structure (Related to PD Score 0-dimension):**
+**📊 Basic Structural Counts**
+1. `num_vertices`: Total number of data points
+2. `num_edges`: Number of connections between points  
+3. `betti_0`: Number of separated groups
 
-1. `num_vertices`: Number of nodes - Total count of data points
-2. `num_edges`: Number of edges - Count of connections between points
-3. `betti_0`: Number of connected components - **Directly corresponds to PD Score 0-dimension**
+**🔄 Repetitive Pattern Details**
+4. `betti_1`: Number of cyclic structures
+5. `clustering_coeff`: Density of local connections
 
-**Cycle/Hole Structure (Related to PD Score 1-dimension):**
+**🌐 Complex Structures**
+6. `num_triangles`: Number of triangular structures
 
-4. `betti_1`: Number of 1-dimensional holes - **Directly corresponds to PD Score 1-dimension**
-5. `clustering_coeff`: Clustering coefficient - Density of local cyclic structures
+**📈 Network Statistics**
+7. `max_degree`: Most connected point
+8. `avg_degree`: Average number of connections
+9. `avg_filtration`: Average timing of structure formation
+10. `filtration_var`: Variation in structure formation
+11. `max_filtration`: Most distant connection
 
-**Complex Structure (Related to PD Score 2-dimension):**
+**Department Store Interpretation Examples**:
+- High `betti_1` = Regular seasonal patterns exist
+- High `clustering_coeff` = Customer groups are densely related
+- Abnormally high `max_degree` = Everything concentrated in specific month (sign of anomaly)
 
-6. `num_triangles`: Number of triangles - Basic units of higher-order structures
+### Practical Analysis Steps
 
-**Graph Statistics:**
+**Step 1: Data Preparation**
+```python
+# Monthly department store data (24 months)
+data = np.array([
+    [sales1, sales2, customers, hours],  # January
+    [sales1, sales2, customers, hours],  # February
+    # ... 24 months of data
+])
+```
 
-7. `max_degree`: Maximum degree - Most connected point
-8. `avg_degree`: Average degree - Average connection density
-9. `avg_filtration`: Average filtration - Average threshold for structure formation
-10. `filtration_var`: Filtration variance - Irregularity in structure formation
-11. `max_filtration`: Maximum filtration - Most distant connection distance
+**Step 2: Preprocessing**
+```python
+# Smooth and normalize data
+data_transformed = signed_log_transform(data)
+data_normalized, _ = normalize_data(data_transformed)
+windows, labels = create_sliding_windows(data_normalized, window_size=12)  # 12-month windows
+```
 
-**Complementary Relationship with PD Score:**
-- PD Score: Focuses on "persistence duration" of each dimension
-- Simplex Tree: Focuses on "count, density, distribution" of each dimension
-- Combined evaluation of structural "quality" and "quantity"
+**Step 3: Persistent Homology Analysis**
+```python
+# Birth-death analysis for each window
+tda_extractor = TDAFeatureExtractor()
+features, components = tda_extractor.extract_features(windows, return_components=True)
+
+# Check "structural stability" for each month
+persistence_scores = components['pd_scores']
+simplex_features = components['simplex_tree_features']
+```
+
+**Step 4: Anomaly Month Detection**
+```python
+# Abnormally short persistence = Unstable structure = Anomaly month
+threshold = np.percentile(persistence_scores, 5)  # Bottom 5%
+anomaly_months = persistence_scores < threshold
+
+print(f"Anomaly months: {np.where(anomaly_months)[0] + 1}th month")
+```
+
+This approach allows **intuitive understanding of "why that month is abnormal" from a structural perspective**.
 
 ## Advantages of Topological Anomaly Detection
 
