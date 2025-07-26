@@ -98,89 +98,89 @@ simplex_features = components['simplex_tree_features']
 
 The sample data used in `example_usage.py` simulates **monthly department store business data**:
 
-- **Feature 0**: Main sales (food, clothing, miscellaneous goods, etc.) in millions of yen
-- **Feature 1**: Related product sales (event products, seasonal products, etc.) in millions of yen
-- **Feature 2**: Customer count (monthly total visitors) in thousands
-- **Feature 3**: Operating hours (monthly total operating hours) in hours
+- **Feature 0**: Main sales (food, clothing, general goods, etc.)
+- **Feature 1**: Related product sales (event products, seasonal goods, etc.)
+- **Feature 2**: Customer count (monthly total customer visits)
+- **Feature 3**: Operating hours (monthly total operating hours)
 
 **Data Characteristics**:
-- 12-month seasonal patterns (spring, summer, autumn, winter sales variations)
-- Variations during special periods (New Year, Golden Week, Obon, etc.)
-- Mix of normal and abnormal periods (COVID-19, major construction, etc.)
+- 12-month seasonal patterns (spring, summer, autumn, winter sales fluctuations)
+- Special period variations (New Year, Golden Week, Obon, etc.)
+- Mix of normal and anomalous periods (COVID-19, major construction, etc.)
 
-Using such **familiar and understandable data** makes it intuitive to understand "structural changes" in persistent homology.
+Using such **familiar and understandable data** allows intuitive understanding of persistent homology's "structural changes."
 
-## Anomaly Detection Application
+## Application to Anomaly Detection
 
 **Basic Concept**:
-- **Normal months**: Same seasonal patterns every year → Structures last long → High persistence
-- **Abnormal months**: Patterns break down → Structures collapse quickly → Low persistence
+- **Normal months**: Same seasonal patterns every year → structures persist long → high persistence
+- **Abnormal months**: Patterns break down → structures quickly collapse → low persistence
 
 ```python
 # Detect months with low persistence as anomalies
 tda_extractor = TDAFeatureExtractor()
 features, components = tda_extractor.extract_features(windows, return_components=True)
 
-# Persistence scores (high = normal, low = abnormal)
+# Persistence scores (high = normal, low = anomalous)
 persistence_scores = components['pd_scores']
 
 # Classify bottom 10% as anomalies
 anomaly_threshold = np.percentile(persistence_scores, 10)
 anomalies = persistence_scores < anomaly_threshold
 
-print(f"Abnormal periods: {np.sum(anomalies)} / {len(anomalies)} windows")
+print(f"Anomalous periods: {np.sum(anomalies)} / {len(anomalies)} windows")
 
-# Identify which months are abnormal
+# Identify which months are anomalous
 for i, is_anomaly in enumerate(anomalies):
     if is_anomaly:
         print(f"Anomaly detected in {i+1}th 12-month window")
 ```
 
 **Department Store Example**:
-- Normal: December every year shows regular year-end sales increases
-- Abnormal: December 2020 during COVID-19 shows completely different patterns → Detected by low persistence
+- Normal: December shows regular sales increase due to year-end shopping every year
+- Anomaly: December 2020 during COVID-19 shows completely different pattern → detected by low persistence
 
 ## What is Persistent Homology?
 
-**Simply put, it's a technique to measure "when structures begin and end"**
+**Simply put, it's a technique to measure "the beginning and end of structures"**
 
 ### Basic Concept: Birth-Death
 
-Track "when certain structures start and when they end" in data:
+Track "when structures begin and when they end" in data:
 
-**📍 Birth**: The moment when a new structure appears
-- Department store example: "Period when sales start rising rapidly", "Start of new customer pattern"
+**📍 Birth**: The moment a new structure appears
+- Department store example: "Time when sales start to surge," "Beginning of new customer demographic patterns"
 
-**⚰️ Death**: The moment when that structure disappears  
-- Department store example: "Period when sales rise ends", "End of customer pattern"
+**⚰️ Death**: The moment that structure disappears
+- Department store example: "Time when sales surge ends," "End of customer demographic patterns"
 
 **⏱️ Persistence**: Death - Birth
 - "How long that structure lasted"
-- Long-lasting structures = Important patterns
-- Quickly disappearing structures = Noise
+- Long-lasting structures = important patterns
+- Quickly disappearing structures = noise
 
-### Viewing Structures in 3 Dimensions
+### Viewing Structure in Three Dimensions
 
-**🏝️ 0-dimension (Islands/Connected Components)**
-- How many "clusters" of data exist
-- Department store example: "Separation of weekday and weekend customers", "Different generational customer groups"
+**🏝️ 0-dimensional (Islands/Connected Components)**
+- How many "clusters" exist in the data
+- Department store example: "Separation of weekday and weekend customers," "Different generational customer groups"
 
-**🔄 1-dimension (Holes/Cycles)**  
+**🔄 1-dimensional (Holes/Cycles)**
 - "Repetitive patterns" in data
-- Department store example: "Month-end sale cycles", "Seasonal variation patterns"
+- Department store example: "Month-end sale cycles," "Seasonal variation patterns"
 
-**🌐 2-dimension (Voids/Complex Structures)**
-- Complex 3-dimensional structures
+**🌐 2-dimensional (Voids/Complex Structures)**
+- Complex three-dimensional structures
 - Department store example: "Complex sales patterns involving multiple factors"
 
 ### Why Effective for Anomaly Detection?
 
-**Normal times**: Regular patterns → Structures persist long (long persistence)
-**Abnormal times**: Patterns collapse → Structures disappear quickly (short persistence)
+**Normal times**: Regular patterns → structures persist long (long persistence)
+**Abnormal times**: Patterns collapse → structures quickly disappear (short persistence)
 
 **Concrete Example (Department Store)**:
-- Normal: Sales rise at month-end every month (12 regular birth-death cycles)
-- Abnormal: Pattern disappears during COVID-19 (disrupted birth-death)
+- Normal: Monthly end-of-month sales increase (12 regular birth-death cycles)
+- Anomaly: Pattern disappears during COVID-19 (disrupted birth-death patterns)
 
 ## Feature Details
 
@@ -260,16 +260,16 @@ simplex_features = components['simplex_tree_features']
 threshold = np.percentile(persistence_scores, 5)  # Bottom 5%
 anomaly_months = persistence_scores < threshold
 
-print(f"Anomaly months: {np.where(anomaly_months)[0] + 1}th month")
+print(f"Anomalous months: {np.where(anomaly_months)[0] + 1}th month")
 ```
 
-This approach allows **intuitive understanding of "why that month is abnormal" from a structural perspective**.
+This method allows **intuitive understanding of "why that month is anomalous" from a structural perspective**.
 
 ## Advantages of Topological Anomaly Detection
 
 - **Shape Change Detection**: Captures topological structural changes in data
-- **Noise Resistance**: Filtering through persistence threshold
-- **Multi-dimensional Support**: Effective even with high-dimensional time series data
+- **Noise Tolerance**: Filtering through persistence thresholds
+- **Multi-dimensional Support**: Effective even for high-dimensional time series data
 
 ## File Structure
 
@@ -284,7 +284,7 @@ persistent_homology_time_series_classifier/
 ├── example_usage.py               # Usage example
 ├── check_environment.py           # Environment check
 ├── requirements.txt               # Required libraries
-├── README.md                      # This file (English)
+├── README.md                      # English README (this file)
 └── README_ja.md                   # Japanese README
 ```
 
@@ -314,7 +314,7 @@ tqdm==4.66.1              # Progress bar
 ## Applicable Anomaly Types
 
 - **Structural Anomalies**: Changes in data correlation structure and dependencies
-- **Pattern Anomalies**: Sudden changes in periodicity and trends
+- **Pattern Anomalies**: Sudden changes in periodicity and trends  
 - **Outlier Groups**: Detection of entire anomalous periods rather than individual outliers
 - **State Changes**: Detection of system operational state transition points
 
@@ -322,18 +322,14 @@ tqdm==4.66.1              # Progress bar
 
 MIT License
 
-## Contributing
-
-Pull requests and issues are welcome.
-
 ## Troubleshooting
 
 ### Common Errors
 
 1. **ImportError: gudhi**: Install with `pip install gudhi`
 2. **Memory shortage**: Adjust number of windows or max_edge_length
-3. **Computation time**: Increase step_size for acceleration
+3. **Processing time**: Increase step_size for acceleration
 
 ### Support
 
-For detailed usage, please refer to `example_usage.py`.
+For detailed usage instructions, please refer to `example_usage.py`.
